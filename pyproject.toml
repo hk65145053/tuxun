@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tuxun"
+version = "0.1.0"
+description = "图寻：用文字搜索本地图片内容的图片管理工具"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "pillow>=10.0",
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "torch>=2.1",
+    "transformers>=4.40",
+]
+
+[project.optional-dependencies]
+heic = ["pillow-heif>=0.16"]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[project.scripts]
+tuxun = "tuxun.cli:main"
+
+[tool.setuptools]
+packages = ["tuxun"]
+
+[tool.setuptools.package-data]
+tuxun = ["static/*"]
