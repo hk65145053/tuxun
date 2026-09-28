@@ -2,6 +2,7 @@
 
 import threading
 from dataclasses import dataclass
+from typing import Callable
 
 import numpy as np
 
@@ -15,61 +16,80 @@ class Filters:
     date_to: float | None = None
 
 
+@dataclass
+class _Snapshot:
+    ids: np.ndarray
+    vectors: np.ndarray
+    folders: np.ndarray
+    dates: np.ndarray
+
+
 class VectorIndex:
     def __init__(self, db: Database):
         self.db = db
         self._lock = threading.Lock()
         self._dirty = True
-        self._ids = np.zeros(0, np.int64)
-        self._vectors = np.zeros((0, 0), np.float32)
-        self._folders = np.array([], dtype=object)
-        self._dates = np.zeros(0, np.float64)
+        self._snapshot: _Snapshot | None = None
 
     def invalidate(self) -> None:
         self._dirty = True
 
-    def _ensure_loaded(self) -> None:
+    def _load(self) -> _Snapshot:
+        """返回当前向量的快照；同一次查询全程使用同一份快照，不受后台索引刷新影响。"""
         with self._lock:
-            if self._dirty:
+            if self._dirty or self._snapshot is None:
                 ids, vectors, folders, dates = self.db.load_vectors()
-                self._ids, self._vectors, self._dates = ids, vectors, dates
-                self._folders = np.array(folders, dtype=object)
+                self._snapshot = _Snapshot(ids, vectors, np.array(folders, dtype=object), dates)
                 self._dirty = False
+            return self._snapshot
 
-    def _mask(self, filters: Filters | None) -> np.ndarray | None:
+    @staticmethod
+    def _mask(snap: _Snapshot, filters: Filters | None) -> np.ndarray | None:
         if filters is None:
             return None
-        mask = np.ones(len(self._ids), dtype=bool)
+        mask = np.ones(len(snap.ids), dtype=bool)
         if filters.folder:
-            mask &= self._folders == filters.folder
+            mask &= snap.folders == filters.folder
         if filters.date_from is not None:
-            mask &= self._dates >= filters.date_from
+            mask &= snap.dates >= filters.date_from
         if filters.date_to is not None:
-            mask &= self._dates <= filters.date_to
+            mask &= snap.dates <= filters.date_to
         return mask
+
+    def search_combined(
+        self,
+        queries: dict[str, np.ndarray],
+        combine: Callable[[dict[str, np.ndarray]], np.ndarray],
+        limit: int = 50,
+        offset: int = 0,
+        filters: Filters | None = None,
+        exclude_id: int | None = None,
+    ) -> list[tuple[int, float]]:
+        """先算出每个查询向量对所有图片的相似度，再用 combine 合成排序分数，从高到低返回 (图片 id, 分数)。"""
+        snap = self._load()
+        if len(snap.ids) == 0:
+            return []
+        scores = combine({key: snap.vectors @ q.astype(np.float32) for key, q in queries.items()})
+        mask = self._mask(snap, filters)
+        if mask is not None:
+            scores = np.where(mask, scores, -np.inf)
+        if exclude_id is not None:
+            scores = np.where(snap.ids == exclude_id, -np.inf, scores)
+        k = min(offset + limit, len(scores))
+        if k <= 0:
+            return []
+        top = np.argpartition(-scores, k - 1)[:k]
+        top = top[np.argsort(-scores[top], kind="stable")][offset:]
+        return [(int(snap.ids[i]), float(scores[i])) for i in top if np.isfinite(scores[i])]
 
     def search(
         self, query: np.ndarray, limit: int = 50, offset: int = 0, filters: Filters | None = None,
         exclude_id: int | None = None,
     ) -> list[tuple[int, float]]:
         """按余弦相似度从高到低返回 (图片 id, 分数)。"""
-        self._ensure_loaded()
-        if len(self._ids) == 0:
-            return []
-        scores = self._vectors @ query.astype(np.float32)
-        mask = self._mask(filters)
-        if mask is not None:
-            scores = np.where(mask, scores, -np.inf)
-        if exclude_id is not None:
-            scores = np.where(self._ids == exclude_id, -np.inf, scores)
-        k = min(offset + limit, len(scores))
-        if k <= 0:
-            return []
-        top = np.argpartition(-scores, k - 1)[:k]
-        top = top[np.argsort(-scores[top], kind="stable")][offset:]
-        return [(int(self._ids[i]), float(scores[i])) for i in top if np.isfinite(scores[i])]
+        return self.search_combined({"q": query}, lambda s: s["q"], limit, offset, filters, exclude_id)
 
     def vector_of(self, image_id: int) -> np.ndarray | None:
-        self._ensure_loaded()
-        hits = np.nonzero(self._ids == image_id)[0]
-        return self._vectors[hits[0]] if len(hits) else None
+        snap = self._load()
+        hits = np.nonzero(snap.ids == image_id)[0]
+        return snap.vectors[hits[0]] if len(hits) else None

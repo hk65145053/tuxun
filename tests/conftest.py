@@ -5,7 +5,7 @@ from PIL import Image
 from tuxun.config import Config
 from tuxun.library import Library
 
-COLORS = {"红": (255, 0, 0), "绿": (0, 255, 0), "蓝": (0, 0, 255)}
+COLORS = {"红": (255, 0, 0), "绿": (0, 255, 0), "蓝": (0, 0, 255), "黄": (255, 255, 0)}
 
 
 class ColorEmbedder:

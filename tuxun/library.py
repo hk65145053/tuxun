@@ -9,6 +9,7 @@ from .config import Config
 from .db import Database, ImageRecord
 from .embedder import ChineseClipEmbedder, Embedder
 from .indexer import Indexer, IndexProgress
+from .query import combine, parse_query, terms_of
 from .search import Filters, VectorIndex
 
 log = logging.getLogger(__name__)
@@ -98,8 +99,11 @@ class Library:
         return [{**records[i].to_dict(), "score": round(s, 4)} for i, s in hits if i in records]
 
     def search_text(self, text: str, limit: int = 50, offset: int = 0, filters: Filters | None = None) -> list[dict]:
-        query = self.embedder.embed_text(text)
-        return self._records(self.index.search(query, limit, offset, filters))
+        """支持多关键词语法，见 query.py。查询为空时抛出 ValueError。"""
+        clauses = parse_query(text)
+        vectors = {term: self.embedder.embed_text(term) for term in terms_of(clauses)}
+        hits = self.index.search_combined(vectors, lambda s: combine(clauses, s), limit, offset, filters)
+        return self._records(hits)
 
     def search_similar(
         self, image_id: int, limit: int = 50, offset: int = 0, filters: Filters | None = None

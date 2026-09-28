@@ -34,3 +34,8 @@ def test_web_flow(library, photos):
 
     assert client.get("/api/search", params={"q": "红", "date_from": "bad"}).status_code == 400
     assert client.get("/api/search", params={"q": "红", "folder": str(photos.resolve())}).json()["results"]
+
+
+def test_empty_query_is_rejected(library):
+    client = TestClient(create_app(library))
+    assert client.get("/api/search", params={"q": "|"}).status_code == 400

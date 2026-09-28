@@ -22,7 +22,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("index", help="为已登记的文件夹建立或更新索引")
 
     p_search = sub.add_parser("search", help="用文字搜索图片")
-    p_search.add_argument("text")
+    p_search.add_argument("text", help="空格表示并且，| 表示或者，-词 表示排除")
     p_search.add_argument("-n", "--limit", type=int, default=20)
 
     p_serve = sub.add_parser("serve", help="启动本地网页界面")
@@ -56,7 +56,12 @@ def main(argv: list[str] | None = None) -> int:
         result = library.run_index(show)
         print(f"\n完成：新增或更新 {result.added} 张，移除 {result.removed} 张，失败 {len(result.failed)} 张")
     elif args.command == "search":
-        for item in library.search_text(args.text, args.limit):
+        try:
+            results = library.search_text(args.text, args.limit)
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return 1
+        for item in results:
             print(f"{item['score']:.3f}  {item['path']}")
     elif args.command == "serve":
         import uvicorn

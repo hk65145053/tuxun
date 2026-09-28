@@ -86,7 +86,10 @@ def create_app(library: Library) -> FastAPI:
         date_from: str | None = None,
         date_to: str | None = None,
     ) -> dict:
-        return {"results": library.search_text(q, limit, offset, filters(folder, date_from, date_to))}
+        try:
+            return {"results": library.search_text(q, limit, offset, filters(folder, date_from, date_to))}
+        except ValueError as e:
+            raise HTTPException(400, str(e))
 
     @app.get("/api/similar/{image_id}")
     def similar(
