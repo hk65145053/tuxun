@@ -124,23 +124,23 @@ class Library:
 
     # 检索
 
-    def _records(self, hits: list[tuple[int, float]]) -> list[dict]:
-        records = self.db.get_many([i for i, _ in hits])
-        return [{**records[i].to_dict(), "score": round(s, 4)} for i, s in hits if i in records]
+    def _records(self, hits: list[tuple[int, float, bool]]) -> list[dict]:
+        records = self.db.get_many([i for i, _, _ in hits])
+        return [
+            {**records[i].to_dict(), "score": round(s, 4), "match": sure} for i, s, sure in hits if i in records
+        ]
 
-    def search_text(
-        self, text: str, limit: int = 50, offset: int = 0, filters: Filters | None = None, strict: bool = True
-    ) -> list[dict]:
+    def search_text(self, text: str, limit: int = 50, offset: int = 0, filters: Filters | None = None) -> list[dict]:
         """支持多关键词语法，见 query.py。查询为空时抛出 ValueError。
 
-        strict 为真时只返回“真的有”要找内容的图片（见 query.matches），否则按相似度返回全部。
+        有把握“图里真有”要找内容的图片（见 query.matches）标 match=True 并排在前面，
+        其余图片按相似度跟在后面，标 match=False。
         """
         clauses = parse_query(text)
         vectors = {term: self.embedder.embed_text(term) for term in terms_of(clauses)}
         hits = self.index.search_combined(
             vectors, lambda s: combine(clauses, s), limit, offset, filters,
-            keep=(lambda s, floor: matches(clauses, s, floor)) if strict else None,
-            references=self.references() if strict else None,
+            confident=lambda s, floor: matches(clauses, s, floor), references=self.references(),
         )
         return self._records(hits)
 

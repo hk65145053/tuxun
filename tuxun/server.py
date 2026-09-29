@@ -105,11 +105,9 @@ def create_app(library: Library) -> FastAPI:
         folder: str | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
-        all: bool = False,
     ) -> dict:
         try:
-            found = library.search_text(q, limit, offset, filters(folder, date_from, date_to), strict=not all)
-            return {"results": found}
+            return {"results": library.search_text(q, limit, offset, filters(folder, date_from, date_to))}
         except ValueError as e:
             raise HTTPException(400, str(e))
 

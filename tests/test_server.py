@@ -42,7 +42,7 @@ def test_empty_query_is_rejected(library):
     assert client.get("/api/search", params={"q": "|"}).status_code == 400
 
 
-def test_pick_folder_and_show_all(library, photos, monkeypatch):
+def test_pick_folder_and_match_flags(library, photos, monkeypatch):
     import tuxun.server
 
     monkeypatch.setattr(tuxun.server, "_ask_directory", lambda: str(photos))
@@ -53,7 +53,6 @@ def test_pick_folder_and_show_all(library, photos, monkeypatch):
     library.add_folder(str(photos))
     library.run_index()
     library._embedder.reference_terms = list(COLORS)
-    strict = client.get("/api/search", params={"q": "红"}).json()["results"]
-    everything = client.get("/api/search", params={"q": "红", "all": "true"}).json()["results"]
-    assert [r["name"] for r in strict] == ["red.jpg"]
-    assert len(everything) == 3
+    results = client.get("/api/search", params={"q": "红"}).json()["results"]
+    assert [(r["name"], r["match"]) for r in results][0] == ("red.jpg", True)
+    assert len(results) == 3 and results[-1]["match"] is False

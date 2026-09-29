@@ -33,7 +33,7 @@
   #grid figcaption { position: absolute; left: 0; right: 0; bottom: 0; padding: 2px 6px; font-size: 12px; color: #fff; background: linear-gradient(transparent, rgba(0,0,0,.6)); opacity: 0; }
   #grid figure:hover figcaption { opacity: 1; }
   #more { display: none; margin: 16px auto; }
-  #showAll { display: none; margin-left: 8px; }
+  #grid .divider { grid-column: 1 / -1; color: var(--muted); font-size: 13px; padding: 12px 0 4px; border-top: 1px solid var(--line); margin-top: 8px; }
   dialog { border: none; border-radius: 12px; background: var(--panel); color: var(--text); padding: 0; max-width: 94vw; max-height: 94vh; }
   dialog::backdrop { background: rgba(0,0,0,.7); }
   #viewer img { display: block; max-width: 94vw; max-height: 80vh; margin: 0 auto; }
@@ -64,7 +64,7 @@
   </div>
 </header>
 <main>
-  <div id="hint"><span id="hintText"></span><button class="link" id="showAll">按相似度显示全部图片</button></div>
+  <div id="hint"><span id="hintText"></span></div>
   <div id="grid"></div>
   <div id="sentinel"></div>
   <button id="more">加载更多</button>
@@ -127,10 +127,19 @@ function fmtDate(ts) {
   return new Date(ts * 1000).toLocaleDateString("zh-CN");
 }
 
+// view：{ url, label, unsure, divider }。label 是有结果时的提示；
+// unsure 是第一张就没把握时的提示；divider 是有把握和没把握两组之间的分隔文字
 function render(results, append) {
   const grid = $("grid");
   if (!append) grid.innerHTML = "";
   for (const item of results) {
+    if (item.match === false && current.lastMatch && current.view.divider) {
+      const div = document.createElement("div");
+      div.className = "divider";
+      div.textContent = current.view.divider;
+      grid.appendChild(div);
+    }
+    current.lastMatch = item.match !== false;
     const fig = document.createElement("figure");
     fig.title = item.path;
     fig.innerHTML = `<img loading="lazy" src="/thumb/${item.id}" alt=""><figcaption></figcaption>`;
@@ -142,26 +151,23 @@ function render(results, append) {
   $("more").style.display = current.done ? "none" : "block";
 }
 
-// empty：没有结果时显示的提示；canShowAll：没有结果时是否提供“显示全部”
-async function run(url, label, append = false, empty = null, canShowAll = false) {
+async function run(view, append = false) {
   if (loading && append) return;
   loading = true;
   const p = filterParams();
   p.set("limit", PAGE);
   p.set("offset", append ? current.offset : 0);
-  current = { url, label, empty, canShowAll, offset: (append ? current.offset : 0) + PAGE, done: false };
-  if (!append) {
-    $("showAll").style.display = "none";
-    hint(modelReady ? "搜索中…" : "正在加载模型，第一次搜索要等十几秒…");
-  }
+  if (append) current.offset += PAGE;
+  else current = { view, offset: PAGE, done: false, lastMatch: false };
+  if (!append) hint(modelReady ? "搜索中…" : "正在加载模型，第一次搜索要等十几秒…");
   try {
-    const data = await api(`${url}${url.includes("?") ? "&" : "?"}${p}`);
+    const data = await api(`${view.url}${view.url.includes("?") ? "&" : "?"}${p}`);
     modelReady = true;
+    const first = data.results[0];
     render(data.results, append);
     if (!append) {
-      const none = !data.results.length;
-      hint(none ? (empty || "没有找到图片，先在“图库”里添加文件夹并建立索引") : label);
-      $("showAll").style.display = none && canShowAll ? "inline" : "none";
+      if (!first) hint("没有找到图片，先在“图库”里添加文件夹并建立索引");
+      else hint(first.match === false && view.unsure ? view.unsure : view.label);
     }
   } catch (e) {
     hint("出错了：" + e.message);
@@ -172,19 +178,22 @@ async function run(url, label, append = false, empty = null, canShowAll = false)
   loadMoreIfNeeded();  // 一页没铺满屏幕时继续加载
 }
 
-function search(all = false) {
+function search() {
   const q = $("q").value.trim();
   if (!q) return;
-  const url = `/api/search?q=${encodeURIComponent(q)}${all ? "&all=true" : ""}`;
-  if (all) run(url, `与“${q}”的相似度从高到低排列（可能都不相关）`);
-  else run(url, `“${q}”的搜索结果，按相关度排序`, false, `没有找到明显包含“${q}”的图片。`, true);
+  run({
+    url: `/api/search?q=${encodeURIComponent(q)}`,
+    label: `“${q}”的搜索结果，按相关度排序`,
+    unsure: `没有找到明显包含“${q}”的图片，下面是按相似度排列的最接近的图片`,
+    divider: `以下图片不一定包含“${q}”，按相似度排列`,
+  });
 }
 
 // 滚动到底部时自动加载下一页
 function loadMoreIfNeeded() {
   const nearBottom = $("sentinel").getBoundingClientRect().top < innerHeight + 600;
   if (nearBottom && current && !current.done && !loading) {
-    run(current.url, current.label, true, current.empty, current.canShowAll);
+    run(current.view, true);
   }
 }
 new IntersectionObserver(loadMoreIfNeeded, { rootMargin: "600px" }).observe($("sentinel"));
@@ -199,13 +208,12 @@ function openViewer(item) {
 }
 
 $("form").onsubmit = (e) => { e.preventDefault(); search(); };
-for (const id of ["folder", "from", "to"]) $(id).onchange = () => current && run(current.url, current.label, false, current.empty, current.canShowAll);
-$("more").onclick = () => run(current.url, current.label, true, current.empty, current.canShowAll);
-$("showAll").onclick = () => search(true);
+for (const id of ["folder", "from", "to"]) $(id).onchange = () => current && run(current.view);
+$("more").onclick = () => run(current.view, true);
 $("closeViewer").onclick = () => $("viewer").close();
 $("similar").onclick = () => {
   $("viewer").close();
-  run(`/api/similar/${viewing.id}`, `与“${viewing.name}”相似的图片`);
+  run({ url: `/api/similar/${viewing.id}`, label: `与“${viewing.name}”相似的图片` });
 };
 
 // 图库设置

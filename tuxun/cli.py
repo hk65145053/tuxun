@@ -24,7 +24,6 @@ def main(argv: list[str] | None = None) -> int:
     p_search = sub.add_parser("search", help="用文字搜索图片")
     p_search.add_argument("text", help="空格表示并且，| 表示或者，-词 表示排除")
     p_search.add_argument("-n", "--limit", type=int, default=20)
-    p_search.add_argument("-a", "--all", action="store_true", help="不过滤不相关的图片，按相似度全部列出")
 
     p_serve = sub.add_parser("serve", help="启动本地网页界面")
     p_serve.add_argument("--host", default="127.0.0.1")
@@ -59,13 +58,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n完成：新增或更新 {result.added} 张，移除 {result.removed} 张，失败 {len(result.failed)} 张")
     elif args.command == "search":
         try:
-            results = library.search_text(args.text, args.limit, strict=not args.all)
+            results = library.search_text(args.text, args.limit)
         except ValueError as e:
             print(e, file=sys.stderr)
             return 1
-        if not results and not args.all:
-            print("没有找到明显匹配的图片，加 --all 可按相似度列出全部", file=sys.stderr)
-        for item in results:
+        if results and not results[0]["match"]:
+            print("没有找到明显包含它的图片，下面是最接近的：")
+        for n, item in enumerate(results):
+            if n and results[n - 1]["match"] and not item["match"]:
+                print("---- 以下不一定相关 ----")
             print(f"{item['score']:.3f}  {item['path']}")
     elif args.command == "serve":
         import uvicorn

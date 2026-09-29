@@ -71,10 +71,13 @@ def test_matches_requires_beating_reference_floor():
     assert matches(parse_query("-云"), scores, floor).tolist() == [True, True, True]
 
 
-def test_strict_search_hides_unrelated_images(colors, embedder):
+def test_confident_matches_come_first(colors, embedder):
     embedder.reference_terms = list(COLORS)
-    # 红、黄图片上“红”排进对照词前三名；绿、蓝、青图片里没有红色，不显示
-    assert names(colors.search_text("红", limit=10)) == ["red.png", "yellow.png"]
-    assert len(colors.search_text("红", limit=10, strict=False)) == 5
-    # “红 | 蓝”：任意一组匹配即可
-    assert "green.png" not in names(colors.search_text("红 | 蓝", limit=10))
+    results = colors.search_text("红", limit=10)
+    assert len(results) == 5
+    # 有把握的一组排在前面，其余图片跟在后面；青色图片里没有红色，不算有把握
+    flags = [r["match"] for r in results]
+    assert flags == sorted(flags, reverse=True) and flags[0] and not flags[-1]
+    assert names(results)[0] == "red.png" and names(results)[-1] == "cyan.png"
+    # 分页时两组的顺序保持不变
+    assert names(colors.search_text("红", limit=2, offset=1)) == names(results)[1:3]
