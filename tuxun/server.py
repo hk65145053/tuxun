@@ -32,6 +32,20 @@ def _parse_date(value: str | None, end_of_day: bool = False) -> float | None:
     return day.timestamp()
 
 
+def _ask_directory() -> str | None:
+    import tkinter
+    from tkinter import filedialog
+
+    root = tkinter.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)  # 否则窗口可能藏在浏览器后面
+    try:
+        path = filedialog.askdirectory(parent=root, title="选择图片文件夹", mustexist=True)
+    finally:
+        root.destroy()
+    return str(Path(path)) if path else None
+
+
 def create_app(library: Library) -> FastAPI:
     app = FastAPI(title="图寻 Tuxun")
 
@@ -54,6 +68,7 @@ def create_app(library: Library) -> FastAPI:
         return {
             "count": library.db.count(),
             "folders": library.folders(),
+            "model_ready": library.model_ready,
             "indexing": library.indexing,
             "progress": None if p is None else {
                 "total": p.total, "done": p.done, "added": p.added, "removed": p.removed, "failed": len(p.failed),
@@ -67,6 +82,11 @@ def create_app(library: Library) -> FastAPI:
             return {"path": library.add_folder(body.path)}
         except ValueError as e:
             raise HTTPException(400, str(e))
+
+    @app.post("/api/pick-folder")
+    def pick_folder() -> dict:
+        """在本机弹出系统的选择文件夹窗口，返回选中的路径；取消时返回 null。"""
+        return {"path": _ask_directory()}
 
     @app.delete("/api/folders")
     def remove_folder(path: str) -> dict:
@@ -85,9 +105,11 @@ def create_app(library: Library) -> FastAPI:
         folder: str | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
+        all: bool = False,
     ) -> dict:
         try:
-            return {"results": library.search_text(q, limit, offset, filters(folder, date_from, date_to))}
+            found = library.search_text(q, limit, offset, filters(folder, date_from, date_to), strict=not all)
+            return {"results": found}
         except ValueError as e:
             raise HTTPException(400, str(e))
 

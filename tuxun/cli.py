@@ -24,10 +24,12 @@ def main(argv: list[str] | None = None) -> int:
     p_search = sub.add_parser("search", help="用文字搜索图片")
     p_search.add_argument("text", help="空格表示并且，| 表示或者，-词 表示排除")
     p_search.add_argument("-n", "--limit", type=int, default=20)
+    p_search.add_argument("-a", "--all", action="store_true", help="不过滤不相关的图片，按相似度全部列出")
 
     p_serve = sub.add_parser("serve", help="启动本地网页界面")
     p_serve.add_argument("--host", default="127.0.0.1")
     p_serve.add_argument("--port", type=int, default=8765)
+    p_serve.add_argument("--open", action="store_true", help="启动后自动打开浏览器")
 
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -57,10 +59,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n完成：新增或更新 {result.added} 张，移除 {result.removed} 张，失败 {len(result.failed)} 张")
     elif args.command == "search":
         try:
-            results = library.search_text(args.text, args.limit)
+            results = library.search_text(args.text, args.limit, strict=not args.all)
         except ValueError as e:
             print(e, file=sys.stderr)
             return 1
+        if not results and not args.all:
+            print("没有找到明显匹配的图片，加 --all 可按相似度列出全部", file=sys.stderr)
         for item in results:
             print(f"{item['score']:.3f}  {item['path']}")
     elif args.command == "serve":
@@ -68,7 +72,14 @@ def main(argv: list[str] | None = None) -> int:
 
         from .server import create_app
 
-        print(f"打开 http://{args.host}:{args.port}")
+        url = f"http://{args.host}:{args.port}"
+        print(f"打开 {url}（关闭这个窗口即可退出图寻）")
+        library.preload()
+        if args.open:
+            import threading
+            import webbrowser
+
+            threading.Timer(1.0, webbrowser.open, [url]).start()
         uvicorn.run(create_app(library), host=args.host, port=args.port, log_level="warning")
     return 0
 

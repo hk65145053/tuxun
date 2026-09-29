@@ -3,6 +3,7 @@ import time
 from fastapi.testclient import TestClient
 
 from tuxun.server import create_app
+from tests.conftest import COLORS
 
 
 def test_web_flow(library, photos):
@@ -39,3 +40,20 @@ def test_web_flow(library, photos):
 def test_empty_query_is_rejected(library):
     client = TestClient(create_app(library))
     assert client.get("/api/search", params={"q": "|"}).status_code == 400
+
+
+def test_pick_folder_and_show_all(library, photos, monkeypatch):
+    import tuxun.server
+
+    monkeypatch.setattr(tuxun.server, "_ask_directory", lambda: str(photos))
+    client = TestClient(create_app(library))
+    assert client.post("/api/pick-folder").json() == {"path": str(photos)}
+    assert client.get("/api/status").json()["model_ready"] is False
+
+    library.add_folder(str(photos))
+    library.run_index()
+    library._embedder.reference_terms = list(COLORS)
+    strict = client.get("/api/search", params={"q": "红"}).json()["results"]
+    everything = client.get("/api/search", params={"q": "红", "all": "true"}).json()["results"]
+    assert [r["name"] for r in strict] == ["red.jpg"]
+    assert len(everything) == 3

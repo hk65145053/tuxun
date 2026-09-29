@@ -5,11 +5,13 @@ import threading
 from pathlib import Path
 from typing import Callable
 
+import numpy as np
+
 from .config import Config
 from .db import Database, ImageRecord
 from .embedder import ChineseClipEmbedder, Embedder
 from .indexer import Indexer, IndexProgress
-from .query import combine, parse_query, terms_of
+from .query import combine, matches, parse_query, terms_of
 from .search import Filters, VectorIndex
 
 log = logging.getLogger(__name__)
@@ -23,6 +25,7 @@ class Library:
         self._embedder_factory = embedder_factory or (lambda: ChineseClipEmbedder(config.model_name))
         self._embedder: Embedder | None = None
         self._embedder_lock = threading.Lock()
+        self._references: np.ndarray | None = None
         self._job: threading.Thread | None = None
         self.progress: IndexProgress | None = None
         self.last_error: str | None = None
@@ -34,6 +37,33 @@ class Library:
             if self._embedder is None:
                 self._embedder = self._embedder_factory()
             return self._embedder
+
+    @property
+    def model_ready(self) -> bool:
+        return self._embedder is not None
+
+    def preload(self) -> None:
+        """在后台线程里加载模型，让第一次搜索不用等。"""
+
+        def job() -> None:
+            try:
+                self.embedder
+                self.references()
+            except Exception:
+                log.exception("模型加载失败")
+
+        threading.Thread(target=job, daemon=True).start()
+
+    def references(self) -> np.ndarray | None:
+        """对照词的向量；模型没有提供对照词时返回 None，此时不做相关度过滤。"""
+        embedder = self.embedder
+        terms = getattr(embedder, "reference_terms", None)
+        if not terms:
+            return None
+        with self._embedder_lock:
+            if self._references is None:
+                self._references = np.stack([embedder.embed_text(t) for t in terms])
+            return self._references
 
     # 文件夹
 
@@ -98,11 +128,20 @@ class Library:
         records = self.db.get_many([i for i, _ in hits])
         return [{**records[i].to_dict(), "score": round(s, 4)} for i, s in hits if i in records]
 
-    def search_text(self, text: str, limit: int = 50, offset: int = 0, filters: Filters | None = None) -> list[dict]:
-        """支持多关键词语法，见 query.py。查询为空时抛出 ValueError。"""
+    def search_text(
+        self, text: str, limit: int = 50, offset: int = 0, filters: Filters | None = None, strict: bool = True
+    ) -> list[dict]:
+        """支持多关键词语法，见 query.py。查询为空时抛出 ValueError。
+
+        strict 为真时只返回“真的有”要找内容的图片（见 query.matches），否则按相似度返回全部。
+        """
         clauses = parse_query(text)
         vectors = {term: self.embedder.embed_text(term) for term in terms_of(clauses)}
-        hits = self.index.search_combined(vectors, lambda s: combine(clauses, s), limit, offset, filters)
+        hits = self.index.search_combined(
+            vectors, lambda s: combine(clauses, s), limit, offset, filters,
+            keep=(lambda s, floor: matches(clauses, s, floor)) if strict else None,
+            references=self.references() if strict else None,
+        )
         return self._records(hits)
 
     def search_similar(

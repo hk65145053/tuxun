@@ -79,3 +79,19 @@ def combine(clauses: list[Clause], term_scores: dict[str, np.ndarray]) -> np.nda
             score = score - np.clip(np.max([z[t] for t in clause.exclude], axis=0), 0, None)
         result = np.maximum(result, score)
     return result
+
+
+def matches(clauses: list[Clause], term_scores: dict[str, np.ndarray], floor: np.ndarray) -> np.ndarray:
+    """判断每张图片是否“真的有”要找的内容，返回布尔数组。
+
+    floor 是每张图片上常见对照词的较高分数。一个词在某张图片上的分数达到 floor，
+    说明它比绝大多数常见词都更贴合这张图，才算匹配。“并且”要求每个词都匹配，
+    “或者”只要任意一组匹配；只有排除词的分支不做限制。
+    """
+    result = np.zeros(len(floor), dtype=bool)
+    for clause in clauses:
+        ok = np.ones(len(floor), dtype=bool)
+        for term in clause.include:
+            ok &= term_scores[term] >= floor
+        result |= ok
+    return result

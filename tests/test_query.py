@@ -3,8 +3,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from tuxun.query import Clause, combine, parse_query, terms_of
-from tests.conftest import make_image
+from tuxun.query import Clause, combine, matches, parse_query, terms_of
+from tests.conftest import COLORS, make_image
 
 
 def test_parse_query():
@@ -57,3 +57,24 @@ def test_and_or_exclude_end_to_end(colors):
     assert set(names(colors.search_text("红 | 蓝", limit=2))) == {"red.png", "blue.png"}
     # 黄色和青色都含绿，与“绿”的相似度相同；排除红色后青色应排在黄色前面
     assert names(colors.search_text("绿 -红", limit=3)) == ["green.png", "cyan.png", "yellow.png"]
+
+
+def test_matches_requires_beating_reference_floor():
+    floor = np.array([0.5, 0.5, 0.5], dtype=np.float32)
+    scores = {
+        "云": np.array([0.6, 0.6, 0.4], dtype=np.float32),
+        "月亮": np.array([0.6, 0.4, 0.6], dtype=np.float32),
+    }
+    assert matches(parse_query("云"), scores, floor).tolist() == [True, True, False]
+    assert matches(parse_query("云 月亮"), scores, floor).tolist() == [True, False, False]
+    assert matches(parse_query("云 | 月亮"), scores, floor).tolist() == [True, True, True]
+    assert matches(parse_query("-云"), scores, floor).tolist() == [True, True, True]
+
+
+def test_strict_search_hides_unrelated_images(colors, embedder):
+    embedder.reference_terms = list(COLORS)
+    # 红、黄图片上“红”排进对照词前三名；绿、蓝、青图片里没有红色，不显示
+    assert names(colors.search_text("红", limit=10)) == ["red.png", "yellow.png"]
+    assert len(colors.search_text("红", limit=10, strict=False)) == 5
+    # “红 | 蓝”：任意一组匹配即可
+    assert "green.png" not in names(colors.search_text("红 | 蓝", limit=10))
