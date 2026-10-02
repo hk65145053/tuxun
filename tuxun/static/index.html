@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>图寻</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --panel: #fff; --text: #1d1d1f; --muted: #6e6e73; --line: #e2e2e0;
+    --accent: #2f6fdb; --danger: #c93c3c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151516; --panel: #1f1f21; --text: #ececee; --muted: #9a9aa0; --line: #333336; --accent: #6b9cff; --danger: #ff7070; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  header { position: sticky; top: 0; z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line); padding: 12px 16px; }
+  .bar { display: flex; gap: 8px; align-items: center; max-width: 1400px; margin: 0 auto; flex-wrap: wrap; }
+  h1 { font-size: 20px; margin: 0 8px 0 0; letter-spacing: 2px; }
+  input, select, button { font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.link { border: none; background: none; color: var(--accent); padding: 0 4px; }
+  #q { flex: 1; min-width: 180px; font-size: 16px; }
+  .filters { margin-top: 8px; color: var(--muted); font-size: 13px; }
+  .filters input, .filters select { padding: 4px 8px; }
+  main { max-width: 1400px; margin: 0 auto; padding: 16px; }
+  #hint { color: var(--muted); margin: 8px 0 16px; }
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
+  #grid figure { margin: 0; aspect-ratio: 1; background: var(--panel); border-radius: 8px; overflow: hidden; cursor: pointer; position: relative; }
+  #grid img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .15s; }
+  #grid figure:hover img { transform: scale(1.03); }
+  #grid figcaption { position: absolute; left: 0; right: 0; bottom: 0; padding: 2px 6px; font-size: 12px; color: #fff; background: linear-gradient(transparent, rgba(0,0,0,.6)); opacity: 0; }
+  #grid figure:hover figcaption { opacity: 1; }
+  #more { display: none; margin: 16px auto; }
+  #grid .divider { grid-column: 1 / -1; color: var(--muted); font-size: 13px; padding: 12px 0 4px; border-top: 1px solid var(--line); margin-top: 8px; }
+  dialog { border: none; border-radius: 12px; background: var(--panel); color: var(--text); padding: 0; max-width: 94vw; max-height: 94vh; }
+  dialog::backdrop { background: rgba(0,0,0,.7); }
+  #viewer img { display: block; max-width: 94vw; max-height: 80vh; margin: 0 auto; }
+  .meta { padding: 10px 14px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+  .meta .path { flex: 1; word-break: break-all; }
+  #settings { width: min(560px, 94vw); padding: 18px; }
+  #settings h2 { margin: 0 0 12px; font-size: 17px; }
+  #folders { list-style: none; padding: 0; margin: 0 0 12px; }
+  #folders li { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); word-break: break-all; }
+  #folders button { color: var(--danger); }
+  .row { display: flex; gap: 8px; }
+  .row input { flex: 1; }
+  progress { width: 100%; height: 8px; margin-top: 12px; }
+  #status { color: var(--muted); font-size: 13px; margin-top: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <form class="bar" id="form">
+    <h1>图寻</h1>
+    <input id="q" placeholder="描述你要找的图片，比如：云、月亮 -云、猫 | 狗" autocomplete="off" autofocus>
+    <button class="primary">搜索</button>
+    <button type="button" id="openSettings">图库</button>
+  </form>
+  <div class="bar filters">
+    文件夹 <select id="folder"><option value="">全部</option></select>
+    日期 <input type="date" id="from"> 至 <input type="date" id="to">
+  </div>
+</header>
+<main>
+  <div id="hint"><span id="hintText"></span></div>
+  <div id="grid"></div>
+  <div id="sentinel"></div>
+  <button id="more">加载更多</button>
+</main>
+
+<dialog id="viewer">
+  <img id="big" alt="">
+  <div class="meta">
+    <span class="path" id="bigPath"></span>
+    <span id="bigInfo"></span>
+    <button id="similar">找相似</button>
+    <a id="original" target="_blank"><button type="button">原图</button></a>
+    <button id="closeViewer">关闭</button>
+  </div>
+</dialog>
+
+<dialog id="settings">
+  <h2>图库文件夹</h2>
+  <ul id="folders"></ul>
+  <div class="row" style="margin-bottom: 8px">
+    <button class="primary" id="pickFolder">选择文件夹…</button>
+  </div>
+  <form class="row" id="addForm">
+    <input id="newFolder" placeholder="也可以粘贴完整路径，如 D:\照片">
+    <button>添加</button>
+  </form>
+  <progress id="bar" max="1" value="0" hidden></progress>
+  <div id="status"></div>
+  <div class="row" style="margin-top: 14px; justify-content: flex-end">
+    <button class="primary" id="reindex">更新索引</button>
+    <button id="closeSettings">关闭</button>
+  </div>
+</dialog>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const PAGE = 30;
+let current = null;   // { url, offset, done }
+let viewing = null;
+let loading = false;
+let modelReady = false;
+const hint = (text) => { $("hintText").textContent = text; };
+
+async function api(url, options) {
+  const res = await fetch(url, options);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || res.statusText);
+  return data;
+}
+
+function filterParams() {
+  const p = new URLSearchParams();
+  if ($("folder").value) p.set("folder", $("folder").value);
+  if ($("from").value) p.set("date_from", $("from").value);
+  if ($("to").value) p.set("date_to", $("to").value);
+  return p;
+}
+
+function fmtDate(ts) {
+  return new Date(ts * 1000).toLocaleDateString("zh-CN");
+}
+
+// view：{ url, label, unsure, divider }。label 是有结果时的提示；
+// unsure 是第一张就没把握时的提示；divider 是有把握和没把握两组之间的分隔文字
+function render(results, append) {
+  const grid = $("grid");
+  if (!append) grid.innerHTML = "";
+  for (const item of results) {
+    if (item.match === false && current.lastMatch && current.view.divider) {
+      const div = document.createElement("div");
+      div.className = "divider";
+      div.textContent = current.view.divider;
+      grid.appendChild(div);
+    }
+    current.lastMatch = item.match !== false;
+    const fig = document.createElement("figure");
+    fig.title = item.path;
+    fig.innerHTML = `<img loading="lazy" src="/thumb/${item.id}" alt=""><figcaption></figcaption>`;
+    fig.querySelector("figcaption").textContent = `${item.name} · ${item.score.toFixed(2)}`;
+    fig.onclick = () => openViewer(item);
+    grid.appendChild(fig);
+  }
+  current.done = results.length < PAGE;
+  $("more").style.display = current.done ? "none" : "block";
+}
+
+async function run(view, append = false) {
+  if (loading && append) return;
+  loading = true;
+  const p = filterParams();
+  p.set("limit", PAGE);
+  p.set("offset", append ? current.offset : 0);
+  if (append) current.offset += PAGE;
+  else current = { view, offset: PAGE, done: false, lastMatch: false };
+  if (!append) hint(modelReady ? "搜索中…" : "正在加载模型，第一次搜索要等十几秒…");
+  try {
+    const data = await api(`${view.url}${view.url.includes("?") ? "&" : "?"}${p}`);
+    modelReady = true;
+    const first = data.results[0];
+    render(data.results, append);
+    if (!append) {
+      if (!first) hint("没有找到图片，先在“图库”里添加文件夹并建立索引");
+      else hint(first.match === false && view.unsure ? view.unsure : view.label);
+    }
+  } catch (e) {
+    hint("出错了：" + e.message);
+    current.done = true;
+  } finally {
+    loading = false;
+  }
+  loadMoreIfNeeded();  // 一页没铺满屏幕时继续加载
+}
+
+function search() {
+  const q = $("q").value.trim();
+  if (!q) return;
+  run({
+    url: `/api/search?q=${encodeURIComponent(q)}`,
+    label: `“${q}”的搜索结果，按相关度排序`,
+    unsure: `没有找到明显包含“${q}”的图片，下面是按相似度排列的最接近的图片`,
+    divider: `以下图片不一定包含“${q}”，按相似度排列`,
+  });
+}
+
+// 滚动到底部时自动加载下一页
+function loadMoreIfNeeded() {
+  const nearBottom = $("sentinel").getBoundingClientRect().top < innerHeight + 600;
+  if (nearBottom && current && !current.done && !loading) {
+    run(current.view, true);
+  }
+}
+new IntersectionObserver(loadMoreIfNeeded, { rootMargin: "600px" }).observe($("sentinel"));
+
+function openViewer(item) {
+  viewing = item;
+  $("big").src = `/image/${item.id}`;
+  $("bigPath").textContent = item.path;
+  $("bigInfo").textContent = [item.width && `${item.width}×${item.height}`, fmtDate(item.date)].filter(Boolean).join(" · ");
+  $("original").href = `/image/${item.id}`;
+  $("viewer").showModal();
+}
+
+$("form").onsubmit = (e) => { e.preventDefault(); search(); };
+for (const id of ["folder", "from", "to"]) $(id).onchange = () => current && run(current.view);
+$("more").onclick = () => run(current.view, true);
+$("closeViewer").onclick = () => $("viewer").close();
+$("similar").onclick = () => {
+  $("viewer").close();
+  run({ url: `/api/similar/${viewing.id}`, label: `与“${viewing.name}”相似的图片` });
+};
+
+// 图库设置
+
+async function refreshStatus() {
+  const s = await api("/api/status");
+  const sel = $("folder"), chosen = sel.value;
+  sel.innerHTML = '<option value="">全部</option>';
+  $("folders").innerHTML = "";
+  for (const f of s.folders) {
+    sel.add(new Option(f, f, false, f === chosen));
+    const li = document.createElement("li");
+    li.innerHTML = `<span></span><button class="link">移除</button>`;
+    li.querySelector("span").textContent = f;
+    li.querySelector("button").onclick = async () => {
+      if (!confirm(`移除 ${f} 及其索引？（不会删除图片文件）`)) return;
+      await api(`/api/folders?path=${encodeURIComponent(f)}`, { method: "DELETE" });
+      refreshStatus();
+    };
+    $("folders").appendChild(li);
+  }
+  if (!s.folders.length) $("folders").innerHTML = "<li>还没有添加文件夹</li>";
+
+  const p = s.progress;
+  $("bar").hidden = !s.indexing;
+  $("reindex").disabled = s.indexing;
+  if (s.indexing && p) {
+    $("bar").max = Math.max(p.total, 1);
+    $("bar").value = p.done;
+    $("status").textContent = p.total ? `索引中 ${p.done} / ${p.total}` : "正在扫描文件夹、加载模型…";
+  } else if (s.error) {
+    $("status").textContent = "索引失败：" + s.error;
+  } else {
+    let text = `已索引 ${s.count} 张图片`;
+    if (p) text += `（上次新增或更新 ${p.added} 张，移除 ${p.removed} 张${p.failed ? `，${p.failed} 张无法读取` : ""}）`;
+    $("status").textContent = text;
+  }
+  modelReady = s.model_ready;
+  if (!s.count && !current) hint("先点右上角“图库”，添加图片文件夹并建立索引");
+  return s;
+}
+
+let polling = null;
+async function poll() {
+  const s = await refreshStatus();
+  clearTimeout(polling);
+  if (s.indexing) polling = setTimeout(poll, 1000);
+}
+
+$("openSettings").onclick = () => { $("settings").showModal(); poll(); };
+$("closeSettings").onclick = () => $("settings").close();
+// 添加文件夹后直接开始建索引，不用再点“更新索引”
+async function addFolder(path) {
+  try {
+    await api("/api/folders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path }) });
+    await api("/api/index", { method: "POST" });
+    poll();
+    return true;
+  } catch (err) {
+    alert(err.message);
+    return false;
+  }
+}
+$("pickFolder").onclick = async () => {
+  $("pickFolder").disabled = true;
+  try {
+    const { path } = await api("/api/pick-folder", { method: "POST" });
+    if (path) await addFolder(path);
+  } catch (err) {
+    alert("无法打开选择窗口：" + err.message + "\n可以在下面粘贴文件夹路径。");
+  } finally {
+    $("pickFolder").disabled = false;
+  }
+};
+$("addForm").onsubmit = async (e) => {
+  e.preventDefault();
+  if (await addFolder($("newFolder").value.trim())) $("newFolder").value = "";
+};
+$("reindex").onclick = async () => { await api("/api/index", { method: "POST" }); poll(); };
+
+refreshStatus();
+</script>
+</body>
+</html>
